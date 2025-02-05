@@ -1,0 +1,101 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Cython and C extension build artifacts
+*.so
+*.pyd
+*.dll
+
+# Virtual environment
+venv/
+.env/
+.venv/
+Pipfile
+Pipfile.lock
+poetry.lock
+
+# Package distributions
+dist/
+build/
+*.egg-info/
+*.egg
+.eggs/
+
+# Dependency caching
+pip-wheel-metadata/
+*.whl
+
+# Logs and debugging
+*.log
+*.out
+*.err
+logs/
+debug.log
+
+# IDE and editor configs
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Coverage reports
+.coverage
+.coverage.*
+.cache/
+nosetests.xml
+coverage.xml
+*.cover
+htmlcov/
+
+# Testing / pytest
+.pytest_cache/
+.tox/
+noxfile.py
+.nox/
+
+# Type hints
+.mypy_cache/
+.dmypy.json
+.pyre/
+
+# Black, Ruff, and other formatters/linter caches
+.black/
+ruff_cache/
+pylint.log
+
+# Profiling data
+*.prof
+*.lprof
+*.dat
+
+# Docker & container artifacts
+docker-compose.override.yml
+*.dockerfile
+*.dockerignore
+
+# Security & secrets (avoid storing sensitive files)
+.env
+.env.local
+.env.production
+secrets.json
+
+# Deployment & CI/CD
+.pytest_cache/
+pytest_debug.log
+.vscode-test/
+*.code-workspace
+
+# Generated files & lock files
+poetry.lock
+Pipfile.lock
+yarn.lock
+package-lock.json
