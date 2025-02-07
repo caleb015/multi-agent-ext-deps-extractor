@@ -1,0 +1,24 @@
+# Core dependencies
+langchain>=0.1.0
+openai>=1.0.0  # Optional, remove if not using OpenAI
+tqdm>=4.64.0  # For progress bars in CLI
+
+# System utilities
+gitpython>=3.1.30  # To interface with Git repositories if needed
+pydantic>=2.0.0  # For structured data validation
+python-dotenv>=1.0.0  # For managing environment variables (AWS Secrets, etc.)
+
+# Testing & Logging
+pytest>=7.2.2  # For writing unit tests
+pytest-mock>=3.10.0  # Mock subprocess calls (e.g., mock Docker execution)
+rich>=13.0.0  # Pretty CLI output with colors/logging
+loguru>=0.7.0  # Advanced structured logging
+
+# Security & Secrets Management
+boto3>=1.26.0  # AWS SDK for fetching secrets (optional, used for AWS Secrets Manager)
+
+# Dependency Extraction Utilities
+docker>=6.0.0  # To manage Docker execution via Python API
+
+# 🔹 New Addition: Language Detection (Replacing GitHub Linguist)
+pygments>=2.16.0  # Python-based syntax highlighter, used for language detection
