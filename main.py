@@ -3,10 +3,14 @@ import os
 import sys
 import subprocess
 import logging
+from dotenv import load_dotenv
 
 from agents.language_detection_agent import LanguageDetectionAgent
 from agents.dependency_extraction_agent import DependencyExtractionAgent
-# from agents.standardized_output_agent import StandardizedOutputAgent  # If/when needed
+from agents.standardized_output_agent import StandardizedOutputAgent  # ✅ Enabled
+
+# Load environment variables from .env
+load_dotenv()
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -68,7 +72,7 @@ def build_docker_image():
         sys.exit(1)
 
 def orchestrate_workflow(repo_path: str) -> None:
-    """Orchestrates the multi-agent dependency extraction workflow (ephemeral Docker approach)."""
+    """Orchestrates the multi-agent dependency extraction workflow."""
     logging.info("🚀 Starting Dependency Extraction...")
 
     # 1️⃣ Check Docker is running
@@ -88,8 +92,8 @@ def orchestrate_workflow(repo_path: str) -> None:
         logging.error(f"❌ Language detection failed: {e}")
         sys.exit(1)
 
-    # 4️⃣ Dependency extraction (the agent spawns ephemeral containers)
-    logging.info(f"📦 Extracting dependencies for {language} using ephemeral Docker containers...")
+    # 4️⃣ Dependency extraction
+    logging.info(f"📦 Extracting dependencies for {language} using Docker...")
     try:
         extraction_agent = DependencyExtractionAgent(language, repo_path, docker_image=IMAGE_NAME)
         extraction_result = extraction_agent.run()
@@ -98,10 +102,13 @@ def orchestrate_workflow(repo_path: str) -> None:
         logging.error(f"❌ Dependency extraction error: {e}")
         sys.exit(1)
 
-    # 5️⃣ (Optional) Standardized Output
-    # If you want to finalize the output, you can do:
-    # output_agent = StandardizedOutputAgent(repo_path, language, extraction_result["dependencies"])
-    # output_agent.run()
+    # 5️⃣ Standardized Output Agent
+    logging.info("📑 Standardizing extracted dependencies with LLM...")
+    try:
+        output_agent = StandardizedOutputAgent(repo_path, language, extraction_result["dependencies"])
+        output_agent.run()
+    except Exception as e:
+        logging.error(f"❌ Standardization failed: {e}")
 
     logging.info("✅ Workflow complete.")
 
