@@ -1,5 +1,5 @@
+# agents/dependency_extraction_agent.py
 import subprocess
-import shutil
 import os
 import json
 import logging
@@ -9,118 +9,105 @@ logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=lo
 
 SUPPORTED_LANGUAGES = ["python", "javascript", "java"]  # Expand as needed
 
-EXCLUDED_FOLDERS = {".venv", "venv", "node_modules", "target", "build", "__pycache__", "dist"}
-
 class DependencyExtractionAgent:
     """
-    Spins up a Docker container based on the detected language
-    and retrieves all (including transitive) dependencies.
+    Executes dependency extraction commands in a Docker container that
+    has all necessary tools installed (e.g., multi-agent-runtime image).
+    
+    This agent does not rely on the host having pip/npm/maven; everything
+    is done inside Docker.
     """
 
-    def __init__(self, language: str, repo_path: str):
+    def __init__(self, language: str, repo_path: str, docker_image: str = "multi-agent-runtime"):
+        """
+        :param language: The detected language (e.g., 'python', 'javascript')
+        :param repo_path: Absolute path to the local repository on the host
+        :param docker_image: The Docker image name that has all the tools installed
+        """
         self.language = language.lower()
         self.repo_path = os.path.abspath(repo_path)
+        self.docker_image = docker_image
+
+        # Ensure .shed directory exists
+        self.shed_dir = os.path.join(self.repo_path, ".shed")
+        os.makedirs(self.shed_dir, exist_ok=True)
 
         if self.language not in SUPPORTED_LANGUAGES:
             raise ValueError(f"❌ Unsupported language {self.language}")
 
     def run(self):
         """
-        Executes language-specific Docker commands, returning a dict
-        containing a list of dependencies and versions.
+        Executes language-specific commands in a fresh Docker container.
         """
+        logging.info(f"🐳 Running dependency extraction for {self.language} in Docker image '{self.docker_image}'...")
 
-        # ✅ Ensure we are NOT running inside an excluded directory
-        for excluded in EXCLUDED_FOLDERS:
-            if excluded in self.repo_path:
-                logging.warning(f"⚠️ Skipping {self.repo_path} (excluded folder: {excluded})")
-                return {"dependencies": []}
-
-        logging.info(f"🐳 Running dependency extraction for {self.language}...")
-
-        try:
-            if self.language == "python":
-                return self._extract_python()
-            elif self.language == "javascript":
-                return self._extract_javascript()
-            elif self.language == "java":
-                return self._extract_java()
-            else:
-                raise ValueError(f"❌ Unsupported language: {self.language}")
-        except subprocess.CalledProcessError as e:
-            logging.error(f"❌ Docker command failed: {e.stderr}")
+        if self.language == "python":
+            return self._extract_python()
+        elif self.language == "javascript":
+            return self._extract_javascript()
+        elif self.language == "java":
+            return self._extract_java()
+        else:
+            # Should never happen if SUPPORTED_LANGUAGES is correct
             return {"dependencies": []}
 
     def _extract_python(self) -> dict:
         """
-        Extracts Python dependencies using a Docker container.
-        Reads dependencies from deps.json and ensures valid JSON output.
+        Extract Python dependencies by mounting the repo at /app in a container 
+        that has Python + pipdeptree.
         """
-        logging.info("📦 Running Python dependency extraction using pipdeptree...")
-
-        # Set up the correct path for deps.json inside the mounted container
-        deps_json_path = os.path.join(self.repo_path, "deps.json")
+        logging.info("📦 Running Python dependency extraction with Docker...")
 
         cmd = [
             "docker", "run", "--rm",
             "-v", f"{self.repo_path}:/app",
             "-w", "/app",
-            "python:3.9-slim",
+            self.docker_image,
             "bash", "-c",
             (
+                # Ensure pipdeptree is installed in the container
                 "pip install --quiet pipdeptree && "
+                # Attempt installing dependencies from requirements.txt if present
                 "pip install --quiet -r requirements.txt || true && "
-                "pipdeptree --json-tree > deps.json"
+                # Then run pipdeptree, output JSON to .shed/deps.json
+                "pipdeptree --json-tree > .shed/deps.json"
             )
         ]
 
-        logging.info(f"🔹 Executing: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True)
 
-        logging.debug(f"📝 Docker stdout: {result.stdout}")
-        logging.debug(f"📝 Docker stderr: {result.stderr}")
+        # Log anything that came from the container
+        if result.stdout:
+            logging.info(f"[Docker STDOUT]\n{result.stdout}")
+        if result.stderr:
+            logging.warning(f"[Docker STDERR]\n{result.stderr}")
 
         if result.returncode != 0:
-            logging.error(f"❌ Python dependency extraction failed: {result.stderr}")
+            logging.error("❌ Python dependency extraction command failed.")
             return {"dependencies": []}
 
-        # Read the deps.json file that was created in the repo
-        try:
-            with open(deps_json_path, "r") as f:
-                deps_json = f.read()
+        # Attempt to parse the newly created .shed/deps.json
+        return self._parse_python_deps()
 
-            logging.info("✅ Successfully read deps.json file.")
-            return {"dependencies": self._parse_pipdeptree(deps_json)}
 
-        except FileNotFoundError:
-            logging.error("❌ deps.json file not found.")
+    def _parse_python_deps(self) -> dict:
+        deps_json_path = os.path.join(self.shed_dir, "deps.json")
+        if not os.path.exists(deps_json_path):
+            logging.error("❌ deps.json file not found after Python extraction.")
             return {"dependencies": []}
+
+        with open(deps_json_path, "r") as f:
+            deps_raw = f.read()
+
+        return {"dependencies": self._parse_pipdeptree(deps_raw)}
 
     def _parse_pipdeptree(self, deps_json: str):
         """
-        Parses the JSON output from pipdeptree (version 2.25.0+) which has
-        top-level 'key', 'package_name', 'installed_version', etc.
-
-        Example structure:
-        [
-        {
-            "key": "boto3",
-            "package_name": "boto3",
-            "installed_version": "1.36.15",
-            "dependencies": [
-            {
-                "key": "...",
-                "package_name": "...",
-                "installed_version": "...",
-                "dependencies": [...]
-            }
-            ]
-        },
-        ...
-        ]
+        Parse pipdeptree JSON output and flatten it. 
+        Example structure is a list of packages w/ subdependencies.
         """
         try:
-            logging.debug(f"🔍 Raw pipdeptree output (first 500 chars): {deps_json[:500]}")
+            logging.debug(f"🔍 Raw pipdeptree (first 500 chars): {deps_json[:500]}")
             data = json.loads(deps_json)
 
             if not isinstance(data, list):
@@ -130,78 +117,78 @@ class DependencyExtractionAgent:
             flattened = []
 
             def traverse_deps(dep_obj):
-                """
-                Recursively extract { name, version } from each dependency object.
-                We rely on 'package_name' (fallback to 'key' if absent).
-                """
                 name = dep_obj.get("package_name") or dep_obj.get("key", "unknown")
                 version = dep_obj.get("installed_version", "unknown")
-
                 flattened.append({"name": name, "version": version})
 
-                for sub_dep in dep_obj.get("dependencies", []):
-                    traverse_deps(sub_dep)
+                for sub in dep_obj.get("dependencies", []):
+                    traverse_deps(sub)
 
-            # Process top-level array
             for item in data:
                 traverse_deps(item)
 
-            logging.info(f"✅ Extracted {len(flattened)} dependencies.")
+            logging.info(f"✅ Extracted {len(flattened)} Python dependencies.")
             return flattened
 
         except json.JSONDecodeError:
             logging.error("❌ Failed to parse pipdeptree JSON output. Not valid JSON.")
             return []
 
-
     def _extract_javascript(self) -> dict:
         """
-        Extracts JavaScript dependencies using npm inside a Docker container.
+        Extract JavaScript dependencies in a container that has Node.js installed.
         """
-        logging.info("📦 Running JavaScript dependency extraction using npm list...")
+        logging.info("📦 Running JavaScript dependency extraction with Docker...")
+
         cmd = [
             "docker", "run", "--rm",
             "-v", f"{self.repo_path}:/app",
             "-w", "/app",
-            "node:16-alpine",
+            self.docker_image,
             "sh", "-c",
             (
                 "npm install --quiet || true && "
-                "npm list --json --all"
+                "npm list --json --all > .shed/npm-list.json"
             )
         ]
 
-        logging.info(f"🔹 Executing: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True)
-
-        logging.debug(f"📝 Docker stdout: {result.stdout}")
-        logging.debug(f"📝 Docker stderr: {result.stderr}")
-
         if result.returncode != 0:
-            logging.error(f"❌ JavaScript dependency extraction failed: {result.stderr}")
+            logging.error(f"❌ JavaScript dependency extraction failed:\n{result.stderr}")
             return {"dependencies": []}
 
-        logging.info("✅ Successfully extracted JavaScript dependencies.")
-        return {"dependencies": self._parse_npm_list(result.stdout)}
+        return self._parse_js_deps()
 
-    def _parse_npm_list(self, stdout: str):
+    def _parse_js_deps(self) -> dict:
+        npm_list_path = os.path.join(self.shed_dir, "npm-list.json")
+        if not os.path.exists(npm_list_path):
+            logging.error("❌ npm-list.json file not found after JS extraction.")
+            return {"dependencies": []}
+
+        with open(npm_list_path, "r") as f:
+            npm_data = f.read()
+
+        return {"dependencies": self._parse_npm_list(npm_data)}
+
+    def _parse_npm_list(self, stdout: str) -> list:
         """
-        Parses JSON output from npm list.
+        Flatten the structure returned by 'npm list --json --all'.
         """
         try:
             data = json.loads(stdout)
             flattened = []
 
-            def traverse_deps(deps):
+            def traverse(deps):
                 for name, info in deps.items():
-                    version = info.get("version", "N/A")
+                    version = info.get("version", "unknown")
                     flattened.append({"name": name, "version": version})
                     if "dependencies" in info:
-                        traverse_deps(info["dependencies"])
+                        traverse(info["dependencies"])
 
             if "dependencies" in data:
-                traverse_deps(data["dependencies"])
+                traverse(data["dependencies"])
 
+            logging.info(f"✅ Extracted {len(flattened)} JavaScript dependencies.")
             return flattened
         except json.JSONDecodeError:
             logging.error("❌ Failed to parse npm JSON output.")
@@ -209,33 +196,38 @@ class DependencyExtractionAgent:
 
     def _extract_java(self) -> dict:
         """
-        Extracts Java dependencies using Maven inside a Docker container.
+        Extract Java dependencies in a container that has Maven installed.
         """
-        logging.info("📦 Running Java dependency extraction using mvn dependency:tree...")
+        logging.info("📦 Running Java dependency extraction with Docker...")
+
         cmd = [
             "docker", "run", "--rm",
             "-v", f"{self.repo_path}:/app",
             "-w", "/app",
-            "maven:3.8.5-openjdk-17",
-            "mvn", "dependency:tree", "-DoutputType=tgf"
+            self.docker_image,
+            "mvn", "dependency:tree", "-DoutputType=tgf", "-DoutputFile=.shed/maven-deps.tgf"
         ]
 
-        logging.info(f"🔹 Executing: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True)
-
-        logging.debug(f"📝 Docker stdout: {result.stdout}")
-        logging.debug(f"📝 Docker stderr: {result.stderr}")
-
         if result.returncode != 0:
-            logging.error(f"❌ Java dependency extraction failed: {result.stderr}")
+            logging.error(f"❌ Java dependency extraction failed:\n{result.stderr}")
             return {"dependencies": []}
 
-        logging.info("✅ Successfully extracted Java dependencies.")
-        return {"dependencies": self._parse_maven_tree(result.stdout)}
+        return self._parse_maven_deps()
 
-    def _parse_maven_tree(self, stdout: str):
+    def _parse_maven_deps(self) -> dict:
+        maven_output_path = os.path.join(self.shed_dir, "maven-deps.tgf")
+        if not os.path.exists(maven_output_path):
+            logging.error("❌ maven-deps.tgf not found after Java extraction.")
+            return {"dependencies": []}
+
+        with open(maven_output_path, "r") as f:
+            maven_data = f.read()
+        return {"dependencies": self._parse_maven_tree(maven_data)}
+
+    def _parse_maven_tree(self, stdout: str) -> list:
         """
-        Parses TGF output from Maven dependency tree.
+        The TGF output from Maven can be parsed or flattened here.
         """
         lines = stdout.strip().split("\n")
         flattened = []
@@ -245,4 +237,5 @@ class DependencyExtractionAgent:
             if len(parts) >= 2:
                 flattened.append({"name": parts[1], "version": "unknown"})
 
+        logging.info(f"✅ Extracted {len(flattened)} Java dependencies.")
         return flattened
