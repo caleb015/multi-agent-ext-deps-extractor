@@ -103,32 +103,50 @@ class DependencyExtractionAgent:
 
     def _parse_pipdeptree(self, deps_json: str):
         """
-        Parse pipdeptree JSON output and flatten it. 
-        Example structure is a list of packages w/ subdependencies.
+        Parses the JSON output from `pipdeptree` and extracts dependencies.
+        Ensures correct transitivity marking and handles duplicate versions.
         """
         try:
-            logging.debug(f"🔍 Raw pipdeptree (first 500 chars): {deps_json[:500]}")
+            logging.debug(f"🔍 Raw pipdeptree JSON (first 500 chars): {deps_json[:500]}")
             data = json.loads(deps_json)
 
             if not isinstance(data, list):
-                logging.error("❌ Unexpected JSON format from pipdeptree: expected a list of objects.")
+                logging.error("❌ Unexpected JSON format from pipdeptree: expected a list.")
                 return []
 
-            flattened = []
+            # Flattened dependency list with unique keys
+            dependency_map = {}
 
-            def traverse_deps(dep_obj):
-                name = dep_obj.get("package_name") or dep_obj.get("key", "unknown")
-                version = dep_obj.get("installed_version", "unknown")
-                flattened.append({"name": name, "version": version})
+            def traverse_deps(dep_obj, is_transitive):
+                """Recursively extract dependencies while tracking transitivity."""
+                package_name = dep_obj.get("package_name") or dep_obj.get("key", "unknown")
+                installed_version = dep_obj.get("installed_version", "unknown")
+                key = package_name.lower()  # Normalize case
 
-                for sub in dep_obj.get("dependencies", []):
-                    traverse_deps(sub)
+                # Ensure package is uniquely stored
+                if key in dependency_map:
+                    if installed_version not in dependency_map[key]["installed_versions"]:
+                        dependency_map[key]["installed_versions"].append(installed_version)
+                else:
+                    dependency_map[key] = {
+                        "key": key,
+                        "package_name": package_name,
+                        "installed_versions": [installed_version],
+                        "is_transitive": is_transitive  # Set transitivity correctly
+                    }
 
-            for item in data:
-                traverse_deps(item)
+                # Process child dependencies
+                for sub_dep in dep_obj.get("dependencies", []):
+                    traverse_deps(sub_dep, is_transitive=True)  # Children are always transitive
 
-            logging.info(f"✅ Extracted {len(flattened)} Python dependencies.")
-            return flattened
+            # Traverse each top-level dependency (non-transitive)
+            for dep in data:
+                traverse_deps(dep, is_transitive=False)
+
+            # Convert map to sorted list
+            result = sorted(dependency_map.values(), key=lambda x: x["package_name"])
+            logging.info(f"✅ Extracted {len(result)} unique dependencies.")
+            return result
 
         except json.JSONDecodeError:
             logging.error("❌ Failed to parse pipdeptree JSON output. Not valid JSON.")

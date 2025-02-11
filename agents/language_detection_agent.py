@@ -20,7 +20,8 @@ class LanguageDetectionAgent:
 
             for file in files:
                 ext = os.path.splitext(file)[-1].lower()
-                file_extensions.append(ext)
+                if ext and ext not in {".sample", ".dockerfile"}:  # Exclude unrecognized extensions
+                    file_extensions.append(ext)
 
         if not file_extensions:
             logging.error("❌ No source code files found in the repository.")

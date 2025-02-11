@@ -7,7 +7,8 @@ from dotenv import load_dotenv
 
 from agents.language_detection_agent import LanguageDetectionAgent
 from agents.dependency_extraction_agent import DependencyExtractionAgent
-from agents.standardized_output_agent import StandardizedOutputAgent  # ✅ Enabled
+from agents.standardized_output_agent import StandardizedOutputAgent
+from agents.web_researcher_agent import WebResearcherAgent  
 
 # Load environment variables from .env
 load_dotenv()
@@ -20,6 +21,7 @@ logging.basicConfig(
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 DOCKERFILE_PATH = os.path.join(PROJECT_ROOT, "Dockerfiles", "unified.Dockerfile")
 IMAGE_NAME = "multi-agent-runtime"
+
 
 def check_docker_running():
     """Check if Docker is running; if not, prompt user and exit."""
@@ -34,6 +36,7 @@ def check_docker_running():
     except subprocess.CalledProcessError:
         logging.error("❌ Docker is not running. Please start Docker and try again.")
         sys.exit(1)
+
 
 def check_and_build_docker_image():
     """Check if the Docker image exists; build it if not."""
@@ -55,6 +58,7 @@ def check_and_build_docker_image():
         logging.error(f"❌ Error checking Docker images: {e}")
         sys.exit(1)
 
+
 def build_docker_image():
     """Build the Docker image from the provided Dockerfile."""
     if not os.path.exists(DOCKERFILE_PATH):
@@ -70,6 +74,7 @@ def build_docker_image():
     except subprocess.CalledProcessError as e:
         logging.error(f"❌ Failed to build Docker image: {e}")
         sys.exit(1)
+
 
 def orchestrate_workflow(repo_path: str) -> None:
     """Orchestrates the multi-agent dependency extraction workflow."""
@@ -97,7 +102,7 @@ def orchestrate_workflow(repo_path: str) -> None:
     try:
         extraction_agent = DependencyExtractionAgent(language, repo_path, docker_image=IMAGE_NAME)
         extraction_result = extraction_agent.run()
-        logging.debug(f"⚙️ Extraction result object: {extraction_result}")
+        # logging.debug(f"⚙️ Extraction result object: {extraction_result}")
     except Exception as e:
         logging.error(f"❌ Dependency extraction error: {e}")
         sys.exit(1)
@@ -109,8 +114,21 @@ def orchestrate_workflow(repo_path: str) -> None:
         output_agent.run()
     except Exception as e:
         logging.error(f"❌ Standardization failed: {e}")
+        sys.exit(1)
+
+    # 6️⃣ Web Researcher Agent
+    logging.info("🌎 Researching open-source status and licenses...")
+    try:
+        researcher_agent = WebResearcherAgent(extraction_result["dependencies"])
+        researched_dependencies = researcher_agent.run()
+        output_path = os.path.join(repo_path, ".shed", "open_source_dependencies.json")
+        researcher_agent.save_output(researched_dependencies, output_path)
+    except Exception as e:
+        logging.error(f"❌ Web Researcher Agent failed: {e}")
+        sys.exit(1)
 
     logging.info("✅ Workflow complete.")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Multi-Agent Dependency Extractor")
@@ -127,6 +145,7 @@ def main():
     except Exception as e:
         logging.error(f"❌ Process halted due to error: {e}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
