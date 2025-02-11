@@ -34,7 +34,7 @@ class WebResearcherAgent:
             processed_dependencies.append({
                 "key": dep["key"],
                 "package_name": dep["package_name"],
-                "installed_version": dep["installed_version"],
+                "installed_versions": dep["installed_versions"],
                 "is_transitive": dep["is_transitive"],
                 "is_open_source": is_open_source,
                 "license": license_info if license_info else {"name": "Unknown", "version": "Unknown", "url": None}
@@ -65,23 +65,28 @@ class WebResearcherAgent:
 
 
     def _fetch_license_info(self, package_name: str) -> dict:
-        """
-        Fetches license details using Tavily web search API.
-        """
         logging.info(f"🌎 Searching for license info: {package_name}")
         search_query = f"{package_name} software license"
-        search_results = self.web_search.search(query=search_query, num_results=3)
-        
-        # Extract license info from search results
-        for result in search_results:
-            if "license" in result["snippet"].lower():
+        search_response = self.web_search.search(query=search_query, num_results=3)
+
+        # Debug: Log the full response to check structure
+        logging.debug(f"Tavily response: {search_response}")
+
+        results = search_response.get("results", [])
+
+        # Avoid accessing "installed_version" mistakenly
+        for item in results:
+            content = item.get("content", "").lower()
+
+            if "license" in content:
                 return {
-                    "name": result.get("title", "Unknown"),
-                    "version": "Unknown",  # Further processing needed
-                    "url": result.get("url", None)
+                    "name": "BSD-3-Clause" if "bsd" in content else "Unknown",
+                    "version": "Unknown",
+                    "url": item.get("url", None),
                 }
-        
+
         return {"name": "Unknown", "version": "Unknown", "url": None}
+
 
     def save_output(self, data: list, output_path: str) -> None:
         """
