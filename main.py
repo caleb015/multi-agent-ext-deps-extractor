@@ -8,7 +8,8 @@ from dotenv import load_dotenv
 from agents.language_detection_agent import LanguageDetectionAgent
 from agents.dependency_extraction_agent import DependencyExtractionAgent
 from agents.standardized_output_agent import StandardizedOutputAgent
-from agents.web_researcher_agent import WebResearcherAgent  
+from agents.web_researcher_agent import WebResearcherAgent
+from agents.open_source_doc_generator import OpenSourceDocGenerator
 
 # Load environment variables from .env
 load_dotenv()
@@ -121,11 +122,19 @@ def orchestrate_workflow(repo_path: str) -> None:
     try:
         researcher_agent = WebResearcherAgent(extraction_result["dependencies"])
         researched_dependencies = researcher_agent.run()
-        output_path = os.path.join(repo_path, ".shed", "open_source_dependencies.json")
-        researcher_agent.save_output(researched_dependencies, output_path)
+        researcher_output_path = os.path.join(repo_path, ".shed", "open_source_dependencies.json")
+        researcher_agent.save_output(researched_dependencies, researcher_output_path)
     except Exception as e:
         logging.error(f"❌ Web Researcher Agent failed: {e}")
         sys.exit(1)
+
+    # 7️⃣ Generate Open Source Report ✅
+
+    logging.info("📄 Generating Open Source Declaration document...")
+
+    doc_generator = OpenSourceDocGenerator(repo_path, researcher_output_path)
+
+    doc_generator.run()
 
     logging.info("✅ Workflow complete.")
 
