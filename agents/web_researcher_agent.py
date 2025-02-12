@@ -1,14 +1,32 @@
-import os
 import json
 import logging
+import re
 from langchain_community.chat_models import ChatOpenAI
-from langchain.chains import LLMChain
-from langchain.prompts import PromptTemplate
 from dotenv import load_dotenv
-from tavily import TavilyClient
+from langchain.agents import initialize_agent
+from langchain.tools import TavilySearchResults
 
 # Load environment variables
 load_dotenv()
+
+# Configure logging to store logs in a file
+LOG_FILE = "web_researcher_agent.log"
+logging.basicConfig(
+    filename=LOG_FILE,
+    filemode='a',
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    level=logging.DEBUG
+)
+
+def _clean_llm_response(response_text: str) -> str:
+    """Cleans LLM response by stripping markdown artifacts and extracting JSON content."""
+    response_text = response_text.strip()
+    
+    # Remove markdown formatting (```json ... ```)
+    response_text = re.sub(r"```json\s*", "", response_text)
+    response_text = re.sub(r"```", "", response_text)
+    
+    return response_text
 
 class WebResearcherAgent:
     """
@@ -18,7 +36,15 @@ class WebResearcherAgent:
     def __init__(self, dependencies: list):
         self.dependencies = dependencies
         self.llm = ChatOpenAI(model_name="gpt-4", temperature=0)
-        self.web_search = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
+        self.search_tool = TavilySearchResults()
+        
+        # Initialize agent with Tavily as a tool
+        self.agent = initialize_agent(
+            tools=[self.search_tool],
+            llm=self.llm,
+            agent="zero-shot-react-description",
+            verbose=True
+        )
 
     def run(self) -> list:
         """
@@ -28,65 +54,53 @@ class WebResearcherAgent:
         processed_dependencies = []
 
         for dep in self.dependencies:
-            is_open_source = self._check_open_source(dep["package_name"])
-            license_info = self._fetch_license_info(dep["package_name"]) if is_open_source else None
-
+            research_data = self._research_dependency(dep["package_name"])
+            
             processed_dependencies.append({
                 "key": dep["key"],
                 "package_name": dep["package_name"],
                 "installed_versions": dep["installed_versions"],
                 "is_transitive": dep["is_transitive"],
-                "is_open_source": is_open_source,
-                "license": license_info if license_info else {"name": "Unknown", "version": "Unknown", "url": None}
+                "is_open_source": research_data.get("is_open_source", False),
+                "license": research_data.get("license", {"name": "Unknown", "version": "Unknown", "url": None})
             })
         
         return processed_dependencies
 
-    def _check_open_source(self, package_name: str) -> bool:
+    def _research_dependency(self, package_name: str) -> dict:
         """
-        Checks if the given package is open-source by querying an LLM.
+        Uses LLM with Tavily as a tool to determine if a package is open-source and extract its license.
         """
-        prompt = PromptTemplate.from_template(
-            """
-            Is the package "{package_name}" an open-source software library? 
-            Respond with only 'true' or 'false'.
-            """
-        )
-
-        chain = LLMChain(llm=self.llm, prompt=prompt)
-        raw_response = chain.invoke({"package_name": package_name})
+        logging.info(f"🌎 Researching: {package_name}")
         
-        # 'raw_response' is a dict, so extract the text
-        response_text = raw_response.get("text", "")
-        response_text = response_text.strip().lower()
-
-        # Return True if model output was literally 'true'
-        return response_text == "true"
-
-
-    def _fetch_license_info(self, package_name: str) -> dict:
-        logging.info(f"🌎 Searching for license info: {package_name}")
-        search_query = f"{package_name} software license"
-        search_response = self.web_search.search(query=search_query, num_results=3)
-
-        # Debug: Log the full response to check structure
-        logging.debug(f"Tavily response: {search_response}")
-
-        results = search_response.get("results", [])
-
-        # Avoid accessing "installed_version" mistakenly
-        for item in results:
-            content = item.get("content", "").lower()
-
-            if "license" in content:
-                return {
-                    "name": "BSD-3-Clause" if "bsd" in content else "Unknown",
-                    "version": "Unknown",
-                    "url": item.get("url", None),
-                }
-
-        return {"name": "Unknown", "version": "Unknown", "url": None}
-
+        research_prompt = (
+            "Analyze the given package name and determine:"
+            "\n- Whether it is open-source (respond with true or false)."
+            "\n- The software license (SPDX identifier if available, else a recognized name)."
+            "\n- A URL to the official license page if available."
+            "\n\nUse the WebSearch tool to search for relevant information about the package."
+            "\nRespond in JSON format:"
+            "```json"
+            "{"
+            "  \"is_open_source\": <true/false>,"
+            "  \"license\": {"
+            "    \"name\": \"<Extracted License Name or SPDX>\","
+            "    \"url\": \"<License URL if available>\""
+            "  }"
+            "}"
+            "```"
+        )
+        
+        response = self.agent.run(f"{research_prompt}\nPackage Name: {package_name}")
+        logging.debug(f"LLM Research Response ({package_name}): {response}")
+        
+        try:
+            cleaned_response = _clean_llm_response(response)
+            parsed_response = json.loads(cleaned_response)
+            return parsed_response
+        except json.JSONDecodeError:
+            logging.error(f"❌ Failed to parse LLM response for {package_name}: {cleaned_response}")
+            return {"is_open_source": False, "license": {"name": "Unknown", "url": None}}
 
     def save_output(self, data: list, output_path: str) -> None:
         """

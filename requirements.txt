@@ -28,3 +28,4 @@ pygments>=2.16.0  # Python-based syntax highlighter, used for language detection
 
 # 🔹 New Addition: Web Search for License Retrieval
 tavily-python>=0.5.1
+langchain-community>=0.1.0 
