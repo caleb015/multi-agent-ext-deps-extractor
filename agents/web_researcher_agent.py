@@ -5,6 +5,7 @@ from langchain_community.chat_models import ChatOpenAI
 from dotenv import load_dotenv
 from langchain.agents import initialize_agent
 from langchain.tools import TavilySearchResults
+from concurrent.futures import ThreadPoolExecutor
 
 # Load environment variables
 load_dotenv()
@@ -48,23 +49,31 @@ class WebResearcherAgent:
 
     def run(self) -> list:
         """
-        Processes dependencies, checks if they are open-source, and fetches license information.
+        Processes dependencies in batches, checks if they are open-source, and fetches license information.
         """
         logging.info("🔍 Researching dependencies...")
+        logging.info(f"Total number of dependencies to be researched: {len(self.dependencies)}")
         processed_dependencies = []
 
-        for dep in self.dependencies:
-            research_data = self._research_dependency(dep["package_name"])
-            
-            processed_dependencies.append({
-                "key": dep["key"],
-                "package_name": dep["package_name"],
-                "installed_versions": dep["installed_versions"],
-                "is_transitive": dep["is_transitive"],
-                "is_open_source": research_data.get("is_open_source", False),
-                "license": research_data.get("license", {"name": "Unknown", "version": "Unknown", "url": None})
-            })
-        
+        # Define batch size
+        batch_size = 10  # Adjust this number based on your needs and system capabilities
+
+        # Process dependencies in batches
+        with ThreadPoolExecutor() as executor:
+            for i in range(0, len(self.dependencies), batch_size):
+                batch = self.dependencies[i:i + batch_size]
+                results = list(executor.map(self._research_dependency, [dep["package_name"] for dep in batch]))
+                
+                for dep, research_data in zip(batch, results):
+                    processed_dependencies.append({
+                        "key": dep["key"],
+                        "package_name": dep["package_name"],
+                        "installed_versions": dep["installed_versions"],
+                        "is_transitive": dep["is_transitive"],
+                        "is_open_source": research_data.get("is_open_source", False),
+                        "license": research_data.get("license", {"name": "Unknown", "version": "Unknown", "url": None})
+                    })
+
         return processed_dependencies
 
     def _research_dependency(self, package_name: str) -> dict:
@@ -100,7 +109,13 @@ class WebResearcherAgent:
             return parsed_response
         except json.JSONDecodeError:
             logging.error(f"❌ Failed to parse LLM response for {package_name}: {cleaned_response}")
-            return {"is_open_source": False, "license": {"name": "Unknown", "url": None}}
+            return {
+                "is_open_source": False,
+                "license": {
+                    "name": "AI failed to find the license",
+                    "url": None
+                }
+            }
 
     def save_output(self, data: list, output_path: str) -> None:
         """

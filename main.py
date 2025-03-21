@@ -77,7 +77,7 @@ def build_docker_image():
         sys.exit(1)
 
 
-def orchestrate_workflow(repo_path: str) -> None:
+def orchestrate_workflow(repo_path: str, app_name: str) -> None:
     """Orchestrates the multi-agent dependency extraction workflow."""
     logging.info("🚀 Starting Dependency Extraction...")
 
@@ -129,10 +129,9 @@ def orchestrate_workflow(repo_path: str) -> None:
         sys.exit(1)
 
     # 7️⃣ Generate Open Source Report ✅
-
     logging.info("📄 Generating Open Source Declaration document...")
 
-    doc_generator = OpenSourceDocGenerator(repo_path, researcher_output_path)
+    doc_generator = OpenSourceDocGenerator(repo_path, researcher_output_path, app_name)
 
     doc_generator.run()
 
@@ -142,6 +141,7 @@ def orchestrate_workflow(repo_path: str) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Multi-Agent Dependency Extractor")
     parser.add_argument("repo_path", help="Path to the local Git repository.")
+    parser.add_argument("app_name", help="Name of the application.")
     args = parser.parse_args()
 
     repo_path = os.path.abspath(args.repo_path)
@@ -149,8 +149,10 @@ def main():
         logging.error(f"❌ Error: {repo_path} is not a valid directory.")
         sys.exit(1)
 
+    logging.info(f"Application Name: {args.app_name}")
+
     try:
-        orchestrate_workflow(repo_path)
+        orchestrate_workflow(repo_path, args.app_name)
     except Exception as e:
         logging.error(f"❌ Process halted due to error: {e}")
         sys.exit(1)
