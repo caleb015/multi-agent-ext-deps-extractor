@@ -79,7 +79,6 @@ pylint.log
 
 # Docker & container artifacts
 docker-compose.override.yml
-*.dockerfile
 *.dockerignore
 
 # Security & secrets (avoid storing sensitive files)
