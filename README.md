@@ -76,3 +76,6 @@ python main.py <repo_path> <app_name>
 6. **Open Source Research**: Researches open-source licenses and statuses.
 7. **Document Generation**: Generates a DOCX document with the open-source declaration.
 
+## Demo
+Demo is in the repo - see demo [here]([url](https://github.com/caleb015/multi-agent-ext-deps-extractor/blob/master/Demo/Bloomtech%20AI%20Capstone%20Project%20Demo.mp4))
+
