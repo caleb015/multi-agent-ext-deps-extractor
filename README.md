@@ -12,6 +12,22 @@ The Multi-Agent Dependency Extractor is a tool designed to automate the process 
 - **Open Source Research**: Researches the open-source status and licenses of dependencies.
 - **Document Generation**: Generates a DOCX document detailing the open-source components and their licenses.
 
+## Output Documents
+
+The Multi-Agent Dependency Extractor generates several key output documents during its workflow:
+
+1. **Open Source Declaration Document (DOCX)**:
+   - This document provides a detailed overview of the open-source components used in your application.
+   - It includes the names of the components, their licenses, and any relevant URLs for obtaining the source code.
+   - The document is generated in DOCX format and is saved in the `.shed` directory within your repository.
+
+2. **Open Source Dependencies JSON**:
+   - A JSON file named `open_source_dependencies.json` is created, containing detailed information about each dependency.
+   - This file includes data such as the package name, installed versions, whether the dependency is transitive, and its open-source status.
+   - This JSON file is also stored in the `.shed` directory.
+
+These documents are essential for maintaining compliance with open-source licenses and for providing transparency about the software components used in your project.
+
 ## Prerequisites
 
 - Docker must be installed and running on your system.
